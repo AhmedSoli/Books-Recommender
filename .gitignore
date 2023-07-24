@@ -1,0 +1,22 @@
+# Python
+*.pyc
+__pycache__/
+venv/
+dist/
+build/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb-meta
+
+# Editor-specific
+.vscode/
+.idea/
+
+# System
+.DS_Store
+Thumbs.db
+scripts/data/*
