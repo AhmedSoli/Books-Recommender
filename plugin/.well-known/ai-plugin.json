@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "name_for_model": "recBooks",
+  "name_for_human": "Books Recommender",
+  "description_for_human": "Get book recommendations in less than 10 seconds based on your Goodreads reading history.",
+  "description_for_model": "Fetches Goodreads data based on a user's goodread's profile ID, saves it as a CSV, and provides book recommendations. The plugin is designed to interact with ChatGPT to offer personalized suggestions based on the user's reading history.",
+  "auth": {
+      "type": "none"
+  },
+  "api": {
+      "type": "openapi",
+      "url": "http://localhost:8000/openapi.json"
+  },
+  "logo_url": "http://localhost:8000/.well-known/logo.png",
+  "contact_email": "soli@piasso.ai",
+  "legal_info_url": "http://www.localhost:8000.com/legal"
+}
