@@ -1,0 +1,8 @@
+bs4
+pandas
+openai
+tiktoken
+fastapi
+uvicorn
+spacy
+numpy

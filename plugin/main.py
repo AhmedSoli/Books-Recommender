@@ -1,14 +1,18 @@
 import os
-from fastapi import FastAPI, HTTPException
+from typing import Optional, List
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from typing import Optional, List
-import sqlite3
-
+import feedparser
+import pandas as pd
+from sqlalchemy import Column, Integer, String, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 
 # Initialize FastAPI
 app = FastAPI()
+# Add CORS middleware to allow requests from specified origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8080", "https://chat.openai.com"],
@@ -17,88 +21,70 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount(
-    "/.well-known",
-    StaticFiles(directory=os.path.join(os.getcwd(), ".well-known")),
-    name=".well-known",
-)
+# Initialize SQLAlchemy
+engine = create_engine("sqlite:///books.db")
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-# Initialize SQLite
-conn = sqlite3.connect("books.db")
-c = conn.cursor()
-c.execute(
-    """CREATE TABLE IF NOT EXISTS books
-             (id INTEGER PRIMARY KEY,
-             title TEXT NOT NULL,
-             rating INTEGER NOT NULL,
-             comment TEXT)"""
-)
+class Book(Base):
+    """Book model"""
+    __tablename__ = "books"
 
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String)
+    author = Column(String)
+    rating = Column(Integer)
+
+Base.metadata.create_all(bind=engine)
 
 # Define Pydantic models
-class Book(BaseModel):
-    id: Optional[int]
+class BookBase(BaseModel):
+    from datetime import datetime
     title: str
+    author: str
     rating: int
-    comment: Optional[str]
+    read_at: Optional[datetime] = None
 
+class BookCreate(BookBase):
+    pass
 
-class Books(BaseModel):
-    books: List[Book]
+class Book(BookBase):
+    id: int
 
+    class Config:
+        orm_mode = True
 
-@app.post("/books")
-def add_book(book: Book):
-    c.execute(
-        "INSERT INTO books (title, rating, comment) VALUES (?, ?, ?)",
-        (book.title, book.rating, book.comment),
-    )
-    conn.commit()
-    return {"success": True, "book_id": c.lastrowid}
+class GoodreadsProfile(BaseModel):
+    """Goodreads profile model"""
+    url: str
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-@app.put("/books/{id}")
-def update_book(id: int, book: Book):
-    c.execute(
-        "UPDATE books SET title = ?, rating = ?, comment = ? WHERE id = ?",
-        (book.title, book.rating, book.comment, id),
-    )
-    if c.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Book not found")
-    conn.commit()
-    return {"success": True}
+def get_goodreads_books(user_id: str):
+    """Fetches books from a Goodreads user's RSS feed and returns them as a DataFrame."""
+    url = f"https://www.goodreads.com/review/list_rss/{user_id}?shelf=%23ALL%23"
+    feed = feedparser.parse(url)
+    books = [{'title': entry['title'], 'author': entry['author_name'], 'rating': entry['user_rating']} for entry in feed.entries]
+    return pd.DataFrame(books)
 
+@app.post("/goodreads_profile")
+async def save_goodreads_profile(profile: GoodreadsProfile, db: Session = Depends(get_db)):
+    """Endpoint to save Goodreads profile data"""
+    user_id = profile.url.split('/')[-1]  # Extract user ID from URL
+    books_df = get_goodreads_books(user_id)
+    for index, row in books_df.iterrows():
+        book = Book(title=row['title'], author=row['author'], rating=row['rating'])
+        db.add(book)
+    db.commit()
+    return {"message": "Profile data saved successfully."}
 
-@app.delete("/books/{id}")
-def delete_book(id: int):
-    c.execute("DELETE FROM books WHERE id = ?", (id,))
-    if c.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Book not found")
-    conn.commit()
-    return {"success": True}
-
-
-@app.get("/books", response_model=Books)
-def list_books():
-    c.execute("SELECT * FROM books")
-    books = [
-        Book(id=row[0], title=row[1], rating=row[2], comment=row[3])
-        for row in c.fetchall()
-    ]
-    return {"books": books}
-
-
-@app.get("/recommendations")
-def get_recommendations():
-    c.execute("SELECT * FROM books")
-    books = [
-        Book(id=row[0], title=row[1], rating=row[2], comment=row[3])
-        for row in c.fetchall()
-    ]
-    prompt = "Hello, you're my AI for book recommendations. Here are my ratings and comments on some books:\n\n"
-    for book in books:
-        prompt += (
-            f"- '{book.title}' ({book.rating}/5): {book.comment or 'No comment'}\n"
-        )
-    prompt += "\nBased on this, can you recommend three books for me? Please provide explanations."
-    return {"prompt": prompt}
+@app.get("/prompt", response_model=List[Book])
+def get_prompt(db: Session = Depends(get_db)):
+    """Endpoint to get book recommendations"""
+    books = db.query(Book).all()
+    return books
